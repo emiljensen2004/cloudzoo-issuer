@@ -72,6 +72,94 @@ def index():
 
 @app.route("/get_license")
 @requires_auth
+@app.route("/add_license", methods=["POST"])
+@requires_auth
+def add_license():
+    """
+    Checks if a license is available and assigns it to an entity if it is.
+    This is called when a user adds a license to their account.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"description": "Request body is missing"}), 400
+
+        # Safely get the data from the incoming JSON
+        license_info = data.get('license', {})
+        license_key = license_info.get('key')
+        product_id = license_info.get('aud')
+        entity_id = data.get('entityId')
+
+        if not all([license_key, product_id, entity_id]):
+            return jsonify({"description": "Request is missing license key, product ID, or entity ID."}), 400
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # First, find the license and check its current status
+        cur.execute(
+            "SELECT status FROM licenses WHERE license_key = %s AND product_id = %s;",
+            (license_key, product_id)
+        )
+        result = cur.fetchone()
+
+        # CASE 1: The license key doesn't exist at all.
+        if not result:
+            cur.close()
+            conn.close()
+            print(f"CONFLICT: Add attempt for non-existent key: {license_key}")
+            return jsonify({"description": "The provided license key does not exist."}), 409 # 409 Conflict
+
+        current_status = result[0]
+
+        # CASE 2: The license is already assigned.
+        if current_status == 'assigned':
+            cur.close()
+            conn.close()
+            print(f"CONFLICT: Add attempt for already assigned key: {license_key}")
+            return jsonify({"description": "This license key has already been assigned to another account."}), 409
+        
+        # CASE 3 (Success): The license is available.
+        if current_status == 'available':
+            # Assign the license by updating the database record
+            cur.execute(
+                """
+                UPDATE licenses 
+                SET status = 'assigned', entity_id = %s, date_assigned = NOW() 
+                WHERE license_key = %s;
+                """,
+                (entity_id, license_key)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            print(f"SUCCESS: Assigned license {license_key} to entity {entity_id}")
+
+            # Per the documentation, we must return a License Cluster object on success.
+            # This confirms to Cloud Zoo what was just added.
+            license_cluster_response = {
+                "licenses": [
+                    {
+                        "id": license_key,
+                        "key": license_key,
+                        "aud": product_id,
+                        "iss": ISSUER_ID,
+                        "status": "assigned",
+                        "titles": {"en": "Curve Cutter"} # This should match your product name
+                    }
+                ]
+            }
+            return jsonify(license_cluster_response), 200
+
+        # Fallback case for any other status (e.g., 'revoked')
+        cur.close()
+        conn.close()
+        return jsonify({"description": "This license cannot be added at this time."}), 409
+
+    except Exception as e:
+        print(f"FATAL ERROR in /add_license: {e}")
+        return jsonify({"description": "An internal server error occurred."}), 500
 def get_license():
     license_key = request.args.get("key")
     product_id_req = request.args.get("aud") # 'aud' is the product ID
