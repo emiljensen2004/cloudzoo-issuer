@@ -98,7 +98,7 @@ def get_license():
             "key": key,
             "aud": prod_id,
             "iss": ISSUER_ID,
-            "exp": expiration.timestamp() if expiration else None, # Convert datetime to Unix epoch or send null
+            "exp": int(expiration.timestamp()) if expiration else None,
             "numberOfSeats": number_of_seats,
             "editions": json.loads(editions_str) # Parse the JSON string from the DB
         }
@@ -153,7 +153,7 @@ def add_license():
                 "key": license_key,
                 "aud": product_id,
                 "iss": ISSUER_ID,
-                "exp": expiration.timestamp() if expiration else None,
+                "exp": int(expiration.timestamp()) if expiration else None,
                 "numberOfSeats": number_of_seats,
                 "editions": json.loads(editions_str)
             }]
