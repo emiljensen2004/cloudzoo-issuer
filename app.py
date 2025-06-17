@@ -165,6 +165,55 @@ def add_license():
         print(f"FATAL ERROR in /add_license: {e}")
         return jsonify({"description": "An internal server error occurred."}), 500
         
+@app.route("/remove_license", methods=["POST"])
+@requires_auth
+def remove_license():
+    """
+    Sets a license's status back to 'available' in the database.
+    This is called when a user removes a license from their account.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"description": "Request body is missing"}), 400
+
+        # Cloud Zoo sends a LicenseCluster object when removing
+        license_cluster = data.get('licenseCluster', {})
+        licenses_to_remove = license_cluster.get('licenses', [])
+
+        if not licenses_to_remove:
+            return jsonify({"description": "No licenses specified for removal."}), 400
+
+        # Process each license in the cluster (often there's only one)
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        for license_info in licenses_to_remove:
+            license_key = license_info.get('key')
+            if license_key:
+                print(f"INFO: Received request to remove license {license_key}")
+                # Set the license back to available and clear the entity id
+                cur.execute(
+                    """
+                    UPDATE licenses 
+                    SET status = 'available', entity_id = NULL, date_assigned = NULL 
+                    WHERE license_key = %s;
+                    """,
+                    (license_key,)
+                )
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        print(f"SUCCESS: Processed removal for {len(licenses_to_remove)} license(s).")
+        # A successful response has a 200 OK status code and an empty body.
+        return "", 200
+
+    except Exception as e:
+        print(f"FATAL ERROR in /remove_license: {e}")
+        return jsonify({"description": "An internal server error occurred."}), 500        
+        
 # --- Main execution point ---
 setup_database()
 if __name__ == "__main__":
